@@ -62,7 +62,8 @@ $projectDir = isset($opts['project'])
 $profilesDir = isset($opts['profiles'])
     ? rtrim($opts['profiles'], '/')
     : realpath($root . '/profiles');
-$composerBin = $opts['composer'] ?? 'composer';
+// DDEV zuerst erkennen; explizites --composer übersteuert.
+$composerBin = $opts['composer'] ?? ComposerInspector::detectComposerBinary($projectDir);
 $pretty = !isset($opts['compact']);
 
 if (!is_dir($projectDir)) {
@@ -96,6 +97,7 @@ try {
         outdated: $outdated,
         directDeps: $directDeps,
         extraItems: $extraItems,
+        composerCmd: $composerBin,
         checkedAt: gmdate('Y-m-d\TH:i:s\Z'),
     );
 } catch (\Throwable $e) {

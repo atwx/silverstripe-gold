@@ -23,7 +23,24 @@ final class ComposerInspector
     }
 
     /**
-     * Ruft `composer outdated -D -f json` im Projektverzeichnis auf.
+     * Wählt das passende Composer-Binary fürs Projekt.
+     *
+     * DDEV-Projekte (`.ddev/config.yaml` vorhanden) führen Composer im Container
+     * aus — host-seitiges `composer` würde mit falscher PHP-Version / fehlenden
+     * Plattform-Requirements laufen. Darum hier zuerst auf DDEV prüfen.
+     * Ein explizites `--composer=...` übersteuert das (Entry-Logik).
+     */
+    public static function detectComposerBinary(string $projectDir): string
+    {
+        if (is_file(rtrim($projectDir, '/') . '/.ddev/config.yaml')) {
+            return 'ddev composer';
+        }
+
+        return 'composer';
+    }
+
+    /**
+     * Ruft `<composer> outdated -D -f json` im Projektverzeichnis auf.
      *
      * Hinweis: `outdated` listet nur Pakete MIT verfügbarem Update; voll
      * aktuelle Pakete erscheinen nicht (sie zählen als `ok`, siehe ReportBuilder).
@@ -32,10 +49,15 @@ final class ComposerInspector
      */
     public function outdatedDirect(): array
     {
+        // composerBin ist ein (vertrauenswürdiges) Kommando-Präfix und kann
+        // Argumente enthalten (z.B. "ddev composer") — daher NICHT escapen.
+        // Statt --working-dir ins Projekt wechseln: das funktioniert sowohl für
+        // host-`composer` als auch für `ddev composer` (das den Projektkontext
+        // aus dem CWD ermittelt).
         $cmd = sprintf(
-            '%s outdated -D -f json --no-interaction --working-dir=%s 2>/dev/null',
-            escapeshellarg($this->composerBin),
+            'cd %s && %s outdated -D -f json --no-interaction 2>/dev/null',
             escapeshellarg($this->projectDir),
+            $this->composerBin,
         );
 
         $output = [];

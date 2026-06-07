@@ -28,6 +28,7 @@ final class ReportBuilder
      * @param list<array<string,mixed>> $outdated         `installed`-Einträge von composer outdated
      * @param list<string>             $directDeps       alle Direct-Dependency-Namen (für ok-Zähler)
      * @param list<array<string,mixed>> $extraItems       fertige Items aus Fork-/Module-/Frontend-Checks
+     * @param string                   $composerCmd      verwendetes Composer-Binary (z.B. "ddev composer")
      * @return array<string,mixed>
      */
     public function build(
@@ -37,6 +38,7 @@ final class ReportBuilder
         array $outdated,
         array $directDeps,
         array $extraItems,
+        string $composerCmd,
         string $checkedAt,
     ): array {
         $requiredModules = $this->requiredModuleNames($effectiveProfile);
@@ -90,6 +92,7 @@ final class ReportBuilder
             'profile'    => $this->profileLabel($pointer),
             'gold_repo'  => $pointer['gold_repo'] ?? null,
             'gold_ref'   => $pointer['gold_ref'] ?? null,
+            'composer'   => $composerCmd,
             'checked_at' => $checkedAt,
             'items'      => $items,
             'summary'    => $summary,

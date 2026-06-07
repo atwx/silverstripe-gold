@@ -18,7 +18,9 @@ anbieten, eine anzulegen — `profile`, `features`, `gold_repo`, `gold_ref`).
 drift-checker --project="$CLAUDE_PROJECT_DIR"
 ```
 
-- DDEV-Projekt? Composer läuft im Container → `--composer="ddev composer"`.
+- **DDEV wird automatisch erkannt** (`.ddev/config.yaml`) und Composer im
+  Container ausgeführt — nichts zu tun. Das verwendete Binary steht im Report
+  unter `composer`. Übersteuern nur bei Bedarf mit `--composer="..."`.
 - Das Tool ist read-only; es ändert nichts.
 
 Den JSON-Report parsen und die `items` nach `tier` gruppieren.

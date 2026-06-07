@@ -67,8 +67,11 @@ bin/drift-checker --project=/pfad/zum/projekt
 |---|---|---|
 | `--project` | aktuelles Verzeichnis | zu prüfendes Projekt-Repo |
 | `--profiles` | `profiles/` in diesem Repo | Profil-Ordner |
-| `--composer` | `composer` | Composer-Binary (z.B. `"ddev composer"`) |
+| `--composer` | auto (`ddev composer` bei `.ddev/`, sonst `composer`) | Composer-Binary übersteuern |
 | `--compact` | aus | JSON ohne Pretty-Print |
+
+DDEV wird automatisch erkannt (Vorhandensein von `.ddev/config.yaml`); das
+tatsächlich verwendete Binary steht im Report-Feld `composer`.
 
 ## Implementierungsstand
 
