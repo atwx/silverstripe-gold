@@ -12,9 +12,6 @@
             "DriftChecker\\": "src/"
         }
     },
-    "bin": [
-        "bin/drift-checker"
-    ],
     "config": {
         "sort-packages": true
     }

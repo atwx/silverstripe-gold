@@ -1,0 +1,8 @@
+{
+  "name": "silverstripe-gold",
+  "description": "Drift-Checker: prüft ein Silverstripe-/PHP-Projekt gegen den deklarierten Gold-Idealstand und arbeitet Abweichungen nach Tier-Playbook ab.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Adiwidjaja Teamworks GmbH"
+  }
+}

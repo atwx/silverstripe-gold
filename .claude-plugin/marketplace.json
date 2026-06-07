@@ -1,0 +1,13 @@
+{
+  "name": "atwx",
+  "owner": {
+    "name": "Adiwidjaja Teamworks GmbH"
+  },
+  "plugins": [
+    {
+      "name": "silverstripe-gold",
+      "source": ".",
+      "description": "Idealstand + Drift-Checker für Silverstripe-/PHP-Projekte (Tool im PATH + Skill /silverstripe-gold:check)."
+    }
+  ]
+}

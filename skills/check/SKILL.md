@@ -1,20 +1,51 @@
 ---
 name: check
-description: TODO — Tier-Playbook (Konzept §8). Noch nicht implementiert.
+description: Prüft das aktuelle Silverstripe-/PHP-Projekt gegen den Gold-Idealstand (Drift-Check) und arbeitet die Abweichungen nach Tier-Playbook ab. Nutzen, wenn der User ein Repo gegen den Idealstand prüfen, Updates/Drift finden oder gestaffelt durchführen will.
 ---
 
-# check — Tier-Playbook (Platzhalter)
+# check — Drift gegen den Gold-Idealstand prüfen und abarbeiten
 
-> Dieser Skill ist noch ein Stub. Die Struktur folgt §4; das eigentliche
-> Playbook (§8) wird als nächster Schritt geschrieben und an einem Tier-1-Fall
-> getestet, dann am Fork-Fall (Tier 3).
+Dieses Skill bündelt das Tool `drift-checker` (liegt via Plugin im PATH) mit dem
+Tier-Playbook. Es interpretiert den deterministischen JSON-Report und handelt —
+**Urteil fällt nur hier** (Konzept §2/§8).
 
-Geplanter Ablauf (siehe `CONCEPT.md` §8):
+## 1. Report holen
 
-1. `drift-checker` aufrufen, JSON-Report lesen.
-2. Items nach Tier abarbeiten:
-   - **Tier 1** (`outdated-minor`): semver-sichere Bumps, automatisch + Tests.
-   - **Tier 2** (`missing`, `misconfigured`): Vorschlag + Diff, Review-Gate.
-   - **Tier 3** (`outdated-major`, `forbidden-source`): nie automatisch —
-     Changelog/UPGRADING lesen, Migration schrittweise mit Gates. Forks =
-     Git-Rebase, kein `composer update`.
+Vorbedingung: im Projekt liegt eine `.gold-profile.yml` (sonst dem User
+anbieten, eine anzulegen — `profile`, `features`, `gold_repo`, `gold_ref`).
+
+```bash
+drift-checker --project="$CLAUDE_PROJECT_DIR"
+```
+
+- DDEV-Projekt? Composer läuft im Container → `--composer="ddev composer"`.
+- Das Tool ist read-only; es ändert nichts.
+
+Den JSON-Report parsen und die `items` nach `tier` gruppieren.
+
+## 2. Items nach Tier abarbeiten
+
+**Tier 1 — automatisch, ohne Rückfrage.** `outdated-minor` (semver-sicher),
+sofern kein Fork und kein eigenes Modul mit Breaking-Potenzial:
+```bash
+composer update vendor/pkg --with-dependencies
+```
+Danach Tests laufen lassen. Sicher, weil Semver die Garantie gibt.
+
+**Tier 2 — vorschlagen + freigeben.** `missing` (Modul nachinstallieren),
+`misconfigured` (Frontend/Node/Config). Befehl + Diff generieren und **anhalten**.
+Review-Gate — nicht ohne Freigabe ausführen.
+
+**Tier 3 — nie automatisch.** `outdated-major` und `forbidden-source`:
+- **Major:** stoppen, Changelog bzw. `UPGRADING.md` des Moduls lesen, einordnen,
+  Migration **schrittweise mit Gates** planen. Keine durchlaufende Automatik.
+- **`forbidden-source` (Fork):** das ist **keine** `composer update`, sondern
+  eine **Git-Operation** — den Fork-Branch auf das neue Upstream-Tag
+  rebasen/mergen, Konflikte zeigen, Auflösungen vorschlagen, der Mensch nickt ab,
+  neu taggen.
+
+## 3. Zusammenfassen
+
+`summary` wiedergeben (ok / tier1 / tier2 / tier3), klar trennen: was wurde
+automatisch erledigt (Tier 1), was wartet auf Freigabe (Tier 2), was braucht eine
+geplante Migration (Tier 3). Bei Tier 3 nichts ohne ausdrückliche Zustimmung tun.

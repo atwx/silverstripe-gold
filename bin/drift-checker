@@ -6,27 +6,24 @@ declare(strict_types=1);
 namespace DriftChecker;
 
 /**
- * drift-checker — deterministischer Konformitäts-Check (Konzept §6).
+ * drift-checker — On-PATH-Entry des Plugins (Konzept §6/§10).
  *
- * Liest .gold-profile.yml aus dem Projekt-Root, merged base + <profile> +
- * features und vergleicht den Ist-Zustand (composer outdated + composer.lock +
- * Frontend) gegen den Idealstand. Gibt einen JSON-Report nach Schema §6 aus.
+ * Wird vom Claude-Code-Plugin als Bare-Command in den PATH gelegt. Liest
+ * .gold-profile.yml aus dem Projekt-Root, merged base + <profile> + features
+ * und vergleicht den Ist-Zustand gegen den Idealstand → JSON-Report (§6).
  *
- * Naht (§12): kein Firmen-/Framework-Token im Code. project/profiles/composer
- * sind konfigurierbar; das Gold-Repo steht als Config im Zeiger, nicht hier.
+ * Engine-Quellcode liegt in ../tool/src, Profile in ../profiles. Da die Engine
+ * dependency-frei ist, braucht das Plugin kein `composer install` und kein PHAR.
  *
  * Usage:
  *   drift-checker [--project=DIR] [--profiles=DIR] [--composer=BIN] [--compact]
- *
- *   --project   Projektverzeichnis (Default: aktuelles Arbeitsverzeichnis)
- *   --profiles  Profil-Ordner (Default: profiles/ im Engine-Repo)
- *   --composer  Composer-Binary (Default: "composer"; z.B. "ddev composer")
- *   --compact   einzeiliges JSON statt pretty-printed
  */
 
-// Bevorzugt den von Composer generierten Autoloader (für `composer global
-// require`); sonst manuelles, install-freies Laden der dependency-freien Engine.
-$autoload = __DIR__ . '/../../vendor/autoload.php';
+$root = dirname(__DIR__);
+
+// Bevorzugt einen generierten Autoloader (falls jemand im tool/ install macht),
+// sonst manuelles, install-freies Laden.
+$autoload = $root . '/tool/vendor/autoload.php';
 if (is_file($autoload)) {
     require $autoload;
 } else {
@@ -34,7 +31,7 @@ if (is_file($autoload)) {
         ['Yaml', 'ProfileResolver', 'ComposerInspector', 'ForkChecker',
             'ModuleChecker', 'FrontendChecker', 'ReportBuilder'] as $class
     ) {
-        require __DIR__ . '/../src/' . $class . '.php';
+        require $root . '/tool/src/' . $class . '.php';
     }
 }
 
@@ -64,7 +61,7 @@ $projectDir = isset($opts['project'])
     : getcwd();
 $profilesDir = isset($opts['profiles'])
     ? rtrim($opts['profiles'], '/')
-    : realpath(__DIR__ . '/../../profiles');
+    : realpath($root . '/profiles');
 $composerBin = $opts['composer'] ?? 'composer';
 $pretty = !isset($opts['compact']);
 
@@ -86,7 +83,6 @@ try {
     $installed = $inspector->installedPackages();
     $repo = $inspector->projectName();
 
-    // Nicht-Freshness-Checks (§6): Forks, fehlende Module, Frontend/Config.
     $extraItems = array_merge(
         (new ForkChecker())->check($effectiveProfile, $installed),
         (new ModuleChecker())->check($effectiveProfile, $installed),
