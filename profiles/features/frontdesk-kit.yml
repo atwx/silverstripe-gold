@@ -1,0 +1,7 @@
+# Komponierbares Overlay (Konzept §5). Wird über base + silverstripe gemerged.
+schema_version: 1
+requires:
+  framework: "^6"               # Feature-Constraint; Widerspruch = misconfigured im Report
+modules:
+  required:
+    - { name: "atwx/silverstripe-frontdesk-kit", freshness: latest-minor }

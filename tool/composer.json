@@ -1,0 +1,21 @@
+{
+    "name": "atwx/drift-checker",
+    "description": "Deterministischer Drift-Checker: prüft ein PHP-Projekt gegen einen deklarierten Gold-Idealstand (Engine, framework-agnostisch).",
+    "type": "library",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.3",
+        "ext-json": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "DriftChecker\\": "src/"
+        }
+    },
+    "bin": [
+        "bin/drift-checker"
+    ],
+    "config": {
+        "sort-packages": true
+    }
+}

@@ -1,0 +1,19 @@
+# SCHICHT 1 — Framework-Recipe + Standardmodule (Konzept §5).
+schema_version: 1
+extends: base
+framework:
+  constraint: "^6"
+  freshness: latest-minor        # neueste im erlaubten Range erwartet
+recipe:
+  name: "silverstripe/recipe-cms"
+  constraint: "^6"
+modules:
+  required:
+    - { name: "atwx/silverstripe-gate-client", freshness: latest-minor }
+  forks:
+    # Erwartete Herkunft: muss aus der atwx-Org aufgelöst werden, nicht Upstream.
+    # Das Org-Prefix steht NUR hier in den Daten, nie im Code (Naht §12).
+    - { name: "tractorcow/silverstripe-fluent", expected_source: "github.com/atwx/" }
+frontend:
+  build: vite
+  node: ">=20"

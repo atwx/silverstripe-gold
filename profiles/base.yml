@@ -1,0 +1,6 @@
+# SCHICHT 1 — gemeinsamer Sockel (Konzept §5). Intent, nicht Pinning.
+schema_version: 1
+php:
+  constraint: ">=8.3"
+ci:
+  required_workflows: [test, lint]

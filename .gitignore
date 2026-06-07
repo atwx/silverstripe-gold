@@ -1,0 +1,9 @@
+# Tool-Dependencies (nur falls jemand `composer install` im tool/ ausführt —
+# die Engine selbst ist dependency-frei).
+/tool/vendor/
+
+# Box-Build-Artefakte (das fertige bin/*.phar wird hingegen committet, §4).
+/tool/.box/
+*.phar.tmp
+
+.DS_Store

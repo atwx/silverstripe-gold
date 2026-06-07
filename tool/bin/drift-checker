@@ -1,0 +1,114 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+namespace DriftChecker;
+
+/**
+ * drift-checker — deterministischer Konformitäts-Check (Konzept §6).
+ *
+ * Liest .gold-profile.yml aus dem Projekt-Root, merged base + <profile> +
+ * features und vergleicht den Ist-Zustand (composer outdated + composer.lock +
+ * Frontend) gegen den Idealstand. Gibt einen JSON-Report nach Schema §6 aus.
+ *
+ * Naht (§12): kein Firmen-/Framework-Token im Code. project/profiles/composer
+ * sind konfigurierbar; das Gold-Repo steht als Config im Zeiger, nicht hier.
+ *
+ * Usage:
+ *   drift-checker [--project=DIR] [--profiles=DIR] [--composer=BIN] [--compact]
+ *
+ *   --project   Projektverzeichnis (Default: aktuelles Arbeitsverzeichnis)
+ *   --profiles  Profil-Ordner (Default: profiles/ im Engine-Repo)
+ *   --composer  Composer-Binary (Default: "composer"; z.B. "ddev composer")
+ *   --compact   einzeiliges JSON statt pretty-printed
+ */
+
+// Bevorzugt den von Composer generierten Autoloader (für `composer global
+// require`); sonst manuelles, install-freies Laden der dependency-freien Engine.
+$autoload = __DIR__ . '/../../vendor/autoload.php';
+if (is_file($autoload)) {
+    require $autoload;
+} else {
+    foreach (
+        ['Yaml', 'ProfileResolver', 'ComposerInspector', 'ForkChecker',
+            'ModuleChecker', 'FrontendChecker', 'ReportBuilder'] as $class
+    ) {
+        require __DIR__ . '/../src/' . $class . '.php';
+    }
+}
+
+/** @return array<string,string> */
+function parseArgs(array $argv): array
+{
+    $opts = [];
+    foreach (array_slice($argv, 1) as $arg) {
+        if (preg_match('/^--([a-z-]+)(?:=(.*))?$/', $arg, $m)) {
+            $opts[$m[1]] = $m[2] ?? '1';
+        }
+    }
+
+    return $opts;
+}
+
+function fail(string $message): never
+{
+    fwrite(STDERR, "drift-checker: {$message}\n");
+    exit(1);
+}
+
+$opts = parseArgs($argv);
+
+$projectDir = isset($opts['project'])
+    ? rtrim($opts['project'], '/')
+    : getcwd();
+$profilesDir = isset($opts['profiles'])
+    ? rtrim($opts['profiles'], '/')
+    : realpath(__DIR__ . '/../../profiles');
+$composerBin = $opts['composer'] ?? 'composer';
+$pretty = !isset($opts['compact']);
+
+if (!is_dir($projectDir)) {
+    fail("Projektverzeichnis existiert nicht: {$projectDir}");
+}
+if ($profilesDir === false || !is_dir($profilesDir)) {
+    fail('Profil-Ordner nicht gefunden (--profiles=...).');
+}
+
+try {
+    $resolver = new ProfileResolver($profilesDir);
+    $pointer = $resolver->readPointer($projectDir);
+    $effectiveProfile = $resolver->resolve($pointer);
+
+    $inspector = new ComposerInspector($projectDir, $composerBin);
+    $outdated = $inspector->outdatedDirect();
+    $directDeps = $inspector->directDependencyNames();
+    $installed = $inspector->installedPackages();
+    $repo = $inspector->projectName();
+
+    // Nicht-Freshness-Checks (§6): Forks, fehlende Module, Frontend/Config.
+    $extraItems = array_merge(
+        (new ForkChecker())->check($effectiveProfile, $installed),
+        (new ModuleChecker())->check($effectiveProfile, $installed),
+        (new FrontendChecker())->check($effectiveProfile, $projectDir),
+    );
+
+    $report = (new ReportBuilder())->build(
+        repo: $repo,
+        pointer: $pointer,
+        effectiveProfile: $effectiveProfile,
+        outdated: $outdated,
+        directDeps: $directDeps,
+        extraItems: $extraItems,
+        checkedAt: gmdate('Y-m-d\TH:i:s\Z'),
+    );
+} catch (\Throwable $e) {
+    fail($e->getMessage());
+}
+
+$flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
+if ($pretty) {
+    $flags |= JSON_PRETTY_PRINT;
+}
+
+echo json_encode($report, $flags), "\n";
