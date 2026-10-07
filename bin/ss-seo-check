@@ -1,0 +1,540 @@
+#!/usr/bin/env -S python3 -I
+"""HTTP-level SEO check for Silverstripe sites (with or without Fluent).
+
+Checks robots.txt, the XML sitemap, home page URL variants, environment
+mode, canonical/hreflang/Open Graph tags and a few head details on the home
+page and a sample of sitemap URLs. Standard library only.
+
+Usage:
+    ss-seo-check https://example.ddev.site [--pages 10] [--insecure] [--json out.json]
+
+Exit code 1 if at least one ERROR was found.
+"""
+
+import argparse
+import json
+import random
+import re
+import ssl
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
+
+USER_AGENT = "Mozilla/5.0 (compatible; ss-seo-check/1.0)"
+SITEMAP_NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+XHTML_NS = "{http://www.w3.org/1999/xhtml}"
+
+findings = []
+
+
+def report(severity, area, message, url=None):
+    findings.append({"severity": severity, "area": area, "message": message, "url": url})
+
+
+# --- HTTP -------------------------------------------------------------------
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def build_opener(insecure):
+    handlers = [NoRedirect()]
+    if insecure:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        handlers.append(urllib.request.HTTPSHandler(context=ctx))
+    return urllib.request.build_opener(*handlers)
+
+
+class Fetcher:
+    def __init__(self, insecure):
+        self.opener = build_opener(insecure)
+        self.cache = {}
+
+    def get(self, url):
+        """Single request without following redirects."""
+        if url in self.cache:
+            return self.cache[url]
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        try:
+            resp = self.opener.open(req, timeout=30)
+            result = (resp.status, dict(resp.headers.items()), resp.read())
+        except urllib.error.HTTPError as e:
+            result = (e.code, dict(e.headers.items()), e.read() if e.fp else b"")
+        except Exception as e:  # noqa: BLE001
+            result = (0, {}, str(e).encode())
+        self.cache[url] = result
+        return result
+
+    def chain(self, url, limit=10):
+        """Follow redirects manually. Returns [(url, status, location)], final body/headers."""
+        hops = []
+        for _ in range(limit):
+            status, headers, body = self.get(url)
+            location = header(headers, "Location")
+            hops.append((url, status, location))
+            if status in (301, 302, 303, 307, 308) and location:
+                url = urllib.parse.urljoin(url, location)
+                continue
+            return hops, headers, body
+        return hops, {}, b""
+
+
+def header(headers, name):
+    for k, v in headers.items():
+        if k.lower() == name.lower():
+            return v
+    return None
+
+
+# --- HTML -------------------------------------------------------------------
+
+class HeadParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.html_lang = None
+        self.title = None
+        self._in_title = False
+        self.metas = []   # dicts
+        self.links = []   # dicts
+        self.imgs = []    # dicts
+        self.base = None
+
+    def handle_starttag(self, tag, attrs):
+        a = {k.lower(): (v if v is not None else "") for k, v in attrs}
+        if tag == "html":
+            self.html_lang = a.get("lang")
+        elif tag == "title" and self.title is None:
+            self._in_title = True
+            self.title = ""
+        elif tag == "meta":
+            self.metas.append(a)
+        elif tag == "link":
+            self.links.append(a)
+        elif tag == "img":
+            self.imgs.append(a)
+        elif tag == "base":
+            self.base = a.get("href")
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self._in_title = False
+
+    def handle_data(self, data):
+        if self._in_title:
+            self.title += data
+
+    def meta(self, key):
+        """Content of the first meta tag whose name or property equals key (None = missing)."""
+        for m in self.metas:
+            if m.get("name", "").lower() == key or m.get("property", "").lower() == key:
+                return m.get("content", "")
+        return None
+
+    def link_rel(self, rel):
+        return [l for l in self.links if rel in l.get("rel", "").lower().split()]
+
+
+def parse(body):
+    p = HeadParser()
+    p.feed(body.decode("utf-8", "replace"))
+    return p
+
+
+def is_absolute(url):
+    return bool(urllib.parse.urlparse(url).scheme)
+
+
+def norm(url):
+    """Normalise for comparison: no trailing slash except root, no fragment."""
+    u = urllib.parse.urlparse(url)
+    path = u.path.rstrip("/") or "/"
+    return urllib.parse.urlunparse((u.scheme, u.netloc.lower(), path, "", u.query, ""))
+
+
+HREFLANG_RE = re.compile(r"^(x-default|[a-z]{2,3}(-[a-z]{4})?(-([a-z]{2}|\d{3}))?)$", re.I)
+
+
+# --- Checks -----------------------------------------------------------------
+
+def check_robots(f, base):
+    url = base + "/robots.txt"
+    status, headers, body = f.get(url)
+    if status != 200:
+        report("ERROR", "robots.txt", f"robots.txt returns {status}", url)
+        return
+    ctype = header(headers, "Content-Type") or ""
+    if "text/plain" not in ctype:
+        report("WARN", "robots.txt", f"Content-Type is '{ctype}', expected text/plain", url)
+    text = body.decode("utf-8", "replace")
+    sitemaps = re.findall(r"(?im)^\s*sitemap:\s*(\S+)", text)
+    if not sitemaps:
+        report("WARN", "robots.txt", "No 'Sitemap:' line", url)
+    for s in sitemaps:
+        host = urllib.parse.urlparse(s).netloc
+        if host != urllib.parse.urlparse(base).netloc:
+            report("INFO", "robots.txt", f"Sitemap line points to another host: {s} "
+                   "(fine if this is a dev/staging copy of the live robots.txt)", url)
+    # Blanket disallow for all user agents
+    groups = re.split(r"(?im)^\s*user-agent:", text)
+    for g in groups[1:]:
+        agent, _, rules = g.partition("\n")
+        if agent.strip() == "*" and re.search(r"(?im)^\s*disallow:\s*/\s*$", rules):
+            report("ERROR", "robots.txt", "'Disallow: /' for User-agent: * blocks the whole site", url)
+    report("OK", "robots.txt", f"present, {len(sitemaps)} sitemap line(s)", url)
+
+
+def check_sitemap(f, base):
+    url = base + "/sitemap.xml"
+    status, headers, body = f.get(url)
+    if status != 200:
+        report("ERROR", "sitemap", f"sitemap.xml returns {status}", url)
+        return [], {}
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        report("ERROR", "sitemap", "sitemap.xml is not XML (module installed? dev/build run?)", url)
+        return [], {}
+
+    child_urls = []
+    if root.tag == SITEMAP_NS + "sitemapindex":
+        child_urls = [e.text.strip() for e in root.iter(SITEMAP_NS + "loc")]
+    else:
+        child_urls = [url]
+
+    locs = []
+    alternates = {}  # loc -> [(hreflang, href)]
+    for cu in child_urls:
+        s, _, b = f.get(cu)
+        if s != 200:
+            report("ERROR", "sitemap", f"child sitemap returns {s}", cu)
+            continue
+        try:
+            croot = ET.fromstring(b)
+        except ET.ParseError:
+            report("ERROR", "sitemap", "child sitemap is not XML", cu)
+            continue
+        for u in croot.iter(SITEMAP_NS + "url"):
+            loc_el = u.find(SITEMAP_NS + "loc")
+            if loc_el is None or not loc_el.text:
+                continue
+            loc = loc_el.text.strip()
+            locs.append(loc)
+            alternates[loc] = [(l.get("hreflang"), l.get("href"))
+                               for l in u.findall(XHTML_NS + "link") if l.get("rel") == "alternate"]
+
+    base_host = urllib.parse.urlparse(base).netloc
+    foreign = [l for l in locs if urllib.parse.urlparse(l).netloc != base_host]
+    if foreign:
+        report("ERROR", "sitemap", f"{len(foreign)} <loc> on another host, e.g. {foreign[0]}", url)
+    dupes = len(locs) - len(set(locs))
+    if dupes:
+        report("WARN", "sitemap", f"{dupes} duplicate <loc> entries", url)
+
+    langs = {h for alts in alternates.values() for h, _ in alts if h}
+    if langs:
+        check_hreflang_values(sorted(langs), "sitemap", url)
+    report("OK", "sitemap", f"{len(child_urls)} sitemap file(s), {len(locs)} URLs, "
+           f"hreflang values: {', '.join(sorted(langs)) or 'none'}", url)
+    return locs, alternates
+
+
+def check_hreflang_values(values, area, url):
+    bad = [v for v in values if not HREFLANG_RE.match(v)]
+    if bad:
+        report("ERROR", area, f"invalid hreflang value(s): {', '.join(bad)}", url)
+    regional = [v for v in values if "-" in v and v != "x-default"]
+    if regional:
+        languages = [v.split("-")[0] for v in values if v != "x-default"]
+        if len(languages) == len(set(languages)):
+            report("WARN", area, f"region-specific hreflang ({', '.join(regional)}) although every "
+                   "language exists only once: plain language codes (de, en, ...) are clearer", url)
+    if "x-default" not in values:
+        report("WARN", area, "no x-default hreflang", url)
+
+
+def check_environment(f, base):
+    url = base + "/dev"
+    status, _, body = f.get(url)
+    text = body.decode("utf-8", "replace")
+    if status == 200 and ("Development Tools" in text or "dev/build" in text):
+        if urllib.parse.urlparse(base).netloc.endswith(".ddev.site"):
+            report("INFO", "environment", "dev mode (expected locally; run the check against live too)", url)
+        else:
+            report("ERROR", "environment", "/dev is publicly accessible: site runs in dev mode", url)
+    else:
+        report("OK", "environment", f"/dev not public (status {status})", url)
+
+
+def check_home_variants(f, base, locale_prefixes):
+    """Each locale's home page must answer with 200 under exactly one URL."""
+    def resolve(v):
+        hops, _, body = f.chain(base + v)
+        final_url, final_status, _ = hops[-1]
+        if final_status != 200:
+            if not (hops[0][1] == 404 and v.startswith("/home")):
+                report("WARN", "home", f"{v} ends with status {final_status}", base + v)
+            return None
+        if any(s in (302, 307) for _, s, _ in hops[:-1]):
+            report("WARN", "home", f"{v} uses a temporary redirect (302/307), expected 301", base + v)
+        if len(hops) > 2:
+            report("INFO", "home", f"{v} needs {len(hops) - 1} redirects", base + v)
+        pp = parse(body)
+        return norm(final_url), ((pp.title or "").strip(), pp.html_lang)
+
+    root = {v: resolve(v) for v in ("/", "/home", "/home/")}
+    groups = {}
+    for p in locale_prefixes:
+        groups[p] = {v: resolve(v) for v in (f"/{p}", f"/{p}/", f"/{p}/home")}
+    # The unprefixed URLs belong to the locale whose home page looks the same.
+    root_sig = root["/"][1] if root["/"] else None
+    target = next((p for p, g in groups.items()
+                   if any(r and r[1] == root_sig for r in g.values())), None)
+    if target:
+        groups[target].update(root)
+    else:
+        groups[""] = root
+
+    summary = []
+    for p, g in groups.items():
+        finals = {}
+        for v, r in g.items():
+            if r:
+                finals.setdefault(r[0], []).append(v)
+        if len(finals) > 1:
+            report("ERROR", "home", f"home page{' (' + p + ')' if p else ''} answers with 200 under "
+                   f"{len(finals)} URLs: {', '.join(finals)} (301 to one main URL needed)", base)
+        summary += [f"{u} <- {', '.join(vs)}" for u, vs in finals.items()]
+    report("INFO", "home", "home URL variants: " + "; ".join(summary), base)
+
+
+def check_page(f, url, deep=False):
+    hops, headers, body = f.chain(url)
+    final_url, status, _ = hops[-1]
+    if len(hops) > 1:
+        report("WARN", "page", f"URL redirects to {final_url} (sitemap/canonical should list final URLs)", url)
+    if status != 200:
+        report("ERROR", "page", f"status {status}", url)
+        return None
+    xrt = header(headers, "X-Robots-Tag")
+    if xrt and "noindex" in xrt.lower():
+        report("ERROR", "indexing", f"X-Robots-Tag: {xrt}", final_url)
+
+    p = parse(body)
+    robots = p.meta("robots")
+    if robots and "noindex" in robots.lower():
+        report("ERROR", "indexing", f"meta robots: {robots}", final_url)
+    for key in ("x-page-id", "x-cms-edit-link"):
+        if p.meta(key) is not None:
+            report("ERROR", "environment", f"meta {key} visible to anonymous visitors", final_url)
+
+    if not (p.title or "").strip():
+        report("ERROR", "head", "empty <title>", final_url)
+    desc = p.meta("description")
+    if not desc:
+        report("WARN", "head", "no meta description", final_url)
+    if not p.html_lang:
+        report("WARN", "head", "<html> has no lang attribute", final_url)
+
+    # Canonical
+    canon = p.link_rel("canonical")
+    canonical = None
+    if not canon:
+        report("ERROR", "canonical", "no rel=canonical", final_url)
+    elif len(canon) > 1:
+        report("ERROR", "canonical", f"{len(canon)} canonical tags", final_url)
+    else:
+        canonical = canon[0].get("href", "")
+        if not is_absolute(canonical):
+            report("ERROR", "canonical", f"canonical not absolute: '{canonical}'", final_url)
+        elif norm(canonical) != norm(final_url):
+            report("WARN", "canonical", f"canonical points elsewhere: {canonical}", final_url)
+
+    # hreflang
+    alts = [(l.get("hreflang"), l.get("href", "")) for l in p.link_rel("alternate") if l.get("hreflang")]
+    if alts:
+        check_hreflang_values(sorted({h for h, _ in alts}), "hreflang", final_url)
+        for h, href in alts:
+            if not is_absolute(href):
+                report("ERROR", "hreflang", f"hreflang {h} not absolute: {href}", final_url)
+        if norm(final_url) not in {norm(h) for _, h in alts}:
+            report("ERROR", "hreflang", "hreflang set does not contain the page itself", final_url)
+        if deep:
+            for h, href in alts:
+                th, _, tb = f.chain(href)
+                if len(th) > 1 or th[-1][1] != 200:
+                    report("ERROR", "hreflang", f"hreflang {h} target {href} -> "
+                           f"{' -> '.join(str(s) for _, s, _ in th)} (must be a direct 200)", final_url)
+                    continue
+                back = {norm(x.get("href", "")) for x in parse(tb).link_rel("alternate") if x.get("hreflang")}
+                if norm(final_url) not in back:
+                    report("ERROR", "hreflang", f"hreflang {h} target does not link back (no reciprocity)", href)
+
+    # Open Graph / Twitter
+    title_text = (p.title or "").strip()
+    for key in ("og:title", "og:description", "og:url", "og:image", "twitter:card"):
+        v = p.meta(key)
+        if v is None:
+            report("WARN", "social", f"{key} missing", final_url)
+        elif not v.strip():
+            report("WARN", "social", f"{key} empty", final_url)
+    for key in ("og:url", "og:image", "twitter:image"):
+        v = p.meta(key)
+        if v and not is_absolute(v):
+            report("WARN", "social", f"{key} not absolute: '{v}'", final_url)
+    og_url = p.meta("og:url")
+    if og_url and canonical and is_absolute(og_url) and norm(og_url) != norm(canonical):
+        report("WARN", "social", f"og:url ({og_url}) differs from canonical", final_url)
+    og_desc = p.meta("og:description")
+    if og_desc and title_text and og_desc.strip() in title_text:
+        report("WARN", "social", f"og:description is only the page title ('{og_desc}')", final_url)
+    tw_site = p.meta("twitter:site")
+    if tw_site is not None and not tw_site.startswith("@"):
+        report("WARN", "social", f"twitter:site should be an @handle, is '{tw_site}'", final_url)
+
+    # Icons
+    for l in p.link_rel("apple-touch-icon"):
+        href = l.get("href", "").strip()
+        if not href:
+            report("WARN", "icons", "apple-touch-icon with empty href", final_url)
+        elif href.lower().split("?")[0].endswith(".svg"):
+            report("WARN", "icons", f"apple-touch-icon is an SVG (iOS needs PNG): {href}", final_url)
+    for l in p.link_rel("icon") + p.link_rel("mask-icon"):
+        if not l.get("href", "").strip():
+            report("WARN", "icons", f"{l.get('rel')} with empty href", final_url)
+    if not p.link_rel("apple-touch-icon"):
+        report("INFO", "icons", "no apple-touch-icon", final_url)
+
+    # LCP candidate: first large image should not be lazy loaded
+    large = [i for i in p.imgs if _int(i.get("width")) >= 800]
+    if large and large[0].get("loading", "").lower() == "lazy":
+        report("WARN", "performance", f"first large image is loading=lazy (likely LCP/hero): "
+               f"{large[0].get('src', '')[:80]}", final_url)
+
+    return {"url": final_url, "canonical": canonical, "alternates": alts}
+
+
+def _int(v):
+    try:
+        return int(str(v).strip().rstrip("px"))
+    except (TypeError, ValueError):
+        return 0
+
+
+def check_duplicates(f, base, locs, locale_prefixes):
+    """Unprefixed default-locale paths and trailing slashes must not answer with 200."""
+    base_path = urllib.parse.urlparse(base).path.rstrip("/")
+    tested = 0
+    for loc in locs:
+        path = urllib.parse.urlparse(loc).path[len(base_path):]
+        parts = path.strip("/").split("/")
+        if len(parts) < 2 or parts[0] not in locale_prefixes:
+            continue
+        stripped = base + "/" + "/".join(parts[1:])
+        hops, _, _ = f.chain(stripped)
+        if hops[0][1] == 200:
+            report("ERROR", "duplicates", f"also answers without locale prefix: {stripped} (200, expected 301/404)", loc)
+        tested += 1
+        if tested >= 3:
+            break
+    for loc in locs[:3]:
+        if loc.endswith("/"):
+            continue
+        hops, _, _ = f.chain(loc + "/")
+        if hops[0][1] == 200:
+            report("ERROR", "duplicates", "trailing slash variant answers with 200", loc + "/")
+
+
+def check_host_variants(f, base):
+    u = urllib.parse.urlparse(base)
+    if u.netloc.endswith(".ddev.site") or u.netloc.startswith("localhost"):
+        return
+    http = urllib.parse.urlunparse(("http", u.netloc, "/", "", "", ""))
+    hops, _, _ = f.chain(http)
+    if hops[0][1] not in (301, 308) or not hops[-1][0].startswith("https://"):
+        report("WARN", "host", f"http:// does not 301 to https (got {hops[0][1]})", http)
+    other = u.netloc[4:] if u.netloc.startswith("www.") else "www." + u.netloc
+    alt = urllib.parse.urlunparse(("https", other, "/", "", "", ""))
+    hops, _, _ = f.chain(alt)
+    if hops[0][1] == 200:
+        report("ERROR", "host", f"{other} answers with 200 too (expected 301 to {u.netloc})", alt)
+    elif hops[0][1] in (301, 308):
+        report("OK", "host", f"{other} redirects permanently", alt)
+
+
+# --- Main -------------------------------------------------------------------
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("base_url")
+    ap.add_argument("--pages", type=int, default=8, help="number of sitemap URLs to sample (default 8)")
+    ap.add_argument("--insecure", action="store_true", help="skip TLS verification (auto for *.ddev.site)")
+    ap.add_argument("--json", help="write findings as JSON to this file")
+    ap.add_argument("--seed", type=int, default=1)
+    args = ap.parse_args()
+
+    base = args.base_url.rstrip("/")
+    insecure = args.insecure or urllib.parse.urlparse(base).netloc.endswith(".ddev.site")
+    f = Fetcher(insecure)
+
+    check_robots(f, base)
+    locs, _ = check_sitemap(f, base)
+    check_environment(f, base)
+    check_host_variants(f, base)
+
+    # Home page: follow / and use its hreflang links to learn the locale prefixes.
+    hops, _, body = f.chain(base + "/")
+    home_url = hops[-1][0]
+    home = check_page(f, home_url, deep=True)
+    prefixes = set()
+    base_path = urllib.parse.urlparse(base).path.rstrip("/")
+    for _, href in (home or {}).get("alternates", []):
+        seg = urllib.parse.urlparse(href).path[len(base_path):].strip("/").split("/")[0]
+        if seg:
+            prefixes.add(seg)
+    check_home_variants(f, base, sorted(prefixes))
+    if prefixes:
+        check_duplicates(f, base, locs, prefixes)
+
+    random.seed(args.seed)
+    sample = random.sample(locs, min(args.pages, len(locs))) if locs else []
+    for i, loc in enumerate(sample):
+        check_page(f, loc, deep=(i == 0))
+
+    # Output
+    order = {"ERROR": 0, "WARN": 1, "INFO": 2, "OK": 3}
+    seen = set()
+    print(f"# SEO check: {base}\n")
+    print(f"Pages checked: home + {len(sample)} sitemap URLs\n")
+    for sev in ("ERROR", "WARN", "INFO", "OK"):
+        items = [x for x in findings if x["severity"] == sev]
+        if not items:
+            continue
+        print(f"## {sev} ({len(items)})")
+        # Collapse identical messages from several pages.
+        grouped = {}
+        for x in items:
+            grouped.setdefault((x["area"], x["message"]), []).append(x["url"])
+        for (area, msg), urls in grouped.items():
+            if (sev, area, msg) in seen:
+                continue
+            seen.add((sev, area, msg))
+            more = f" (+{len(urls) - 1} more)" if len(urls) > 1 else ""
+            print(f"- [{area}] {msg} — {urls[0]}{more}")
+        print()
+    counts = {s: sum(1 for x in findings if x["severity"] == s) for s in order}
+    print("Summary: " + ", ".join(f"{k} {v}" for k, v in counts.items()))
+
+    if args.json:
+        with open(args.json, "w") as fh:
+            json.dump(findings, fh, indent=2)
+    sys.exit(1 if counts["ERROR"] else 0)
+
+
+if __name__ == "__main__":
+    main()

@@ -15,6 +15,8 @@ Konzept & Begründung: siehe [`CONCEPT.md`](CONCEPT.md).
 | `skills/check/` | 3 — Orchestrierung | Tier-Playbook (`SKILL.md`) → `/silverstripe-gold:check` |
 | `skills/upgrade/` | 3 — Orchestrierung | Upgrade SS 4/5 → 6 via Rector → `/silverstripe-gold:upgrade` |
 | `skills/upgrade-legacy/` | 3 — Orchestrierung | Upgrade SS 3 → 4 → 5 → 6 (upgrader + Rector) → `/silverstripe-gold:upgrade-legacy` |
+| `skills/seo-check/` | 3 — Orchestrierung | Technischer SEO-Check + Lighthouse, Fix-Leitfaden → `/silverstripe-gold:seo-check` |
+| `bin/ss-seo-check`, `bin/ss-lighthouse-failed` | 2 — Werkzeug | HTTP-SEO-Check und Lighthouse-Auswertung (Python 3, nur Standardbibliothek) |
 
 In jedem **Projekt-Repo** liegt nur der dünne Zeiger `.gold-profile.yml` — er
 wählt Profil + Features und zeigt via `gold_repo`/`gold_ref` hierher.
@@ -28,12 +30,16 @@ wählt Profil + Features und zeigt via `gold_repo`/`gold_ref` hierher.
 /plugin install silverstripe-gold@atwx
 ```
 
-Danach liegt das Tool als Bare-Command `drift-checker` im PATH, und die Skills
-sind verfügbar:
+Danach liegen die Tools als Bare-Commands (`drift-checker`, `ss-seo-check`,
+`ss-lighthouse-failed`) im PATH, und die Skills sind verfügbar:
 
 - `/silverstripe-gold:check` — Drift gegen den Idealstand prüfen
 - `/silverstripe-gold:upgrade` — Silverstripe 4/5 → 6 mit Rector
 - `/silverstripe-gold:upgrade-legacy` — Silverstripe 3 → 4 → 5 → 6
+- `/silverstripe-gold:seo-check` — technischer SEO-Check (robots.txt, Sitemap,
+  Canonical, hreflang, Duplikate, OG-Tags …) + Lighthouse gegen ddev und Live.
+  Lighthouse läuft über das Chrome-DevTools-MCP-Plugin
+  (`chrome-devtools-mcp`), alternativ `npx lighthouse`.
 
 Updates holen (beide Schritte nötig, danach Claude Code neu starten):
 

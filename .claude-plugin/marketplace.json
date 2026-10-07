@@ -7,7 +7,7 @@
     {
       "name": "silverstripe-gold",
       "source": ".",
-      "description": "Idealstand + Drift-Checker für Silverstripe-/PHP-Projekte (Tool im PATH + Skill /silverstripe-gold:check) sowie Upgrade-Skills /silverstripe-gold:upgrade und /silverstripe-gold:upgrade-legacy."
+      "description": "Idealstand + Drift-Checker für Silverstripe-/PHP-Projekte (Tool im PATH + Skill /silverstripe-gold:check), Upgrade-Skills /silverstripe-gold:upgrade und /silverstripe-gold:upgrade-legacy sowie SEO-Check /silverstripe-gold:seo-check."
     }
   ]
 }

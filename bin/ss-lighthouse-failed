@@ -1,0 +1,28 @@
+#!/usr/bin/env -S python3 -I
+"""List the failed, weighted audits of one or more Lighthouse JSON reports.
+
+Usage: ss-lighthouse-failed report.json [report2.json ...]
+"""
+
+import json
+import sys
+
+for path in sys.argv[1:]:
+    r = json.load(open(path))
+    form = r.get("configSettings", {}).get("formFactor", "?")
+    scores = ", ".join(f"{c['title']} {round(c['score'] * 100) if c['score'] is not None else '-'}"
+                       for c in r["categories"].values())
+    print(f"# {r.get('finalDisplayedUrl') or r.get('finalUrl')} ({form})\n{scores}\n")
+    for cid, c in r["categories"].items():
+        for ref in c["auditRefs"]:
+            a = r["audits"][ref["id"]]
+            if a.get("score") is None or a["score"] >= 1 or not ref.get("weight"):
+                continue
+            items = a.get("details", {}).get("items", [])
+            print(f"- [{cid}] {a['id']}: {a['title']} ({len(items)} items)")
+            for it in items[:5]:
+                node = it.get("node") or {}
+                label = node.get("snippet") or it.get("url") or node.get("selector") or ""
+                if label:
+                    print(f"    {str(label)[:140]}")
+    print()
