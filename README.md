@@ -35,7 +35,12 @@ sind verfügbar:
 - `/silverstripe-gold:upgrade` — Silverstripe 4/5 → 6 mit Rector
 - `/silverstripe-gold:upgrade-legacy` — Silverstripe 3 → 4 → 5 → 6
 
-Updates holen: `/plugin marketplace update atwx`.
+Updates holen (beide Schritte nötig, danach Claude Code neu starten):
+
+```text
+/plugin marketplace update atwx
+/plugin update silverstripe-gold@atwx
+```
 
 **Schritt B — Zeiger ins Projekt (einmal pro Repo):** eine `.gold-profile.yml`
 in den Projekt-Root committen:
