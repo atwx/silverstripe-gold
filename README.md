@@ -13,6 +13,8 @@ Konzept & Begründung: siehe [`CONCEPT.md`](CONCEPT.md).
 | `bin/drift-checker` | 2 — Werkzeug | On-PATH-Entry (Plugin legt `bin/` in den PATH) |
 | `tool/` | 2 — Werkzeug | dependency-freier Engine-Quellcode (`src/`) |
 | `skills/check/` | 3 — Orchestrierung | Tier-Playbook (`SKILL.md`) → `/silverstripe-gold:check` |
+| `skills/upgrade/` | 3 — Orchestrierung | Upgrade SS 4/5 → 6 via Rector → `/silverstripe-gold:upgrade` |
+| `skills/upgrade-legacy/` | 3 — Orchestrierung | Upgrade SS 3 → 4 → 5 → 6 (upgrader + Rector) → `/silverstripe-gold:upgrade-legacy` |
 
 In jedem **Projekt-Repo** liegt nur der dünne Zeiger `.gold-profile.yml` — er
 wählt Profil + Features und zeigt via `gold_repo`/`gold_ref` hierher.
@@ -26,8 +28,14 @@ wählt Profil + Features und zeigt via `gold_repo`/`gold_ref` hierher.
 /plugin install silverstripe-gold@atwx
 ```
 
-Danach liegt das Tool als Bare-Command `drift-checker` im PATH und der Skill ist
-als `/silverstripe-gold:check` verfügbar.
+Danach liegt das Tool als Bare-Command `drift-checker` im PATH, und die Skills
+sind verfügbar:
+
+- `/silverstripe-gold:check` — Drift gegen den Idealstand prüfen
+- `/silverstripe-gold:upgrade` — Silverstripe 4/5 → 6 mit Rector
+- `/silverstripe-gold:upgrade-legacy` — Silverstripe 3 → 4 → 5 → 6
+
+Updates holen: `/plugin marketplace update atwx`.
 
 **Schritt B — Zeiger ins Projekt (einmal pro Repo):** eine `.gold-profile.yml`
 in den Projekt-Root committen:
