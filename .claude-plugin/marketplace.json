@@ -8,6 +8,14 @@
       "name": "silverstripe-gold",
       "source": ".",
       "description": "Idealstand + Drift-Checker für Silverstripe-/PHP-Projekte (Tool im PATH + Skill /silverstripe-gold:check), Upgrade-Skills /silverstripe-gold:upgrade und /silverstripe-gold:upgrade-legacy sowie SEO-Check /silverstripe-gold:seo-check."
+    },
+    {
+      "name": "validation-kit",
+      "source": {
+        "source": "github",
+        "repo": "atwx/validation-kit"
+      },
+      "description": "Validierung von Neubau oder Upgrade gegen das Altsystem: Anforderungskatalog mit wörtlichen Zitaten, Verhaltensinventar, Playwright-Ablauftests, Regeltests und nachvollziehbarer Bericht (HTML oder FriendlyBase). Skill /validation-kit:validation."
     }
   ]
 }
